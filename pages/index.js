@@ -1,4 +1,6 @@
 import React from 'react';
+import nookies from 'nookies';
+import jwt from 'jsonwebtoken';
 import MainGrid from '../src/components/MainGrid';
 import Box from '../src/components/Box';
 import {AlurakutMenu, AlurakutProfileSidebarMenuDefault, OrkutNostalgicIconSet} from "../src/lib/AlurakutCommons"
@@ -24,14 +26,71 @@ function ProfileSidebar(props){
   );
 }
 
-export default function Home() {
-  const githubUser = 'caiquepatelliscapeline';
+function ProfileRelationsBox(props){
+  return(
+    <ProfileRelationsBoxWrapper>
+      <h2 className="smallTitle">
+        {props.title} ({props.items.length})
+      </h2>
+
+      <ul>
+        {/* {seguidores.map((itemAtual) => {
+          return(
+            <li key={itemAtual}>
+              <a href={`https://github.com${itemAtual}`}>
+                <img src={itemAtual} alt="" />
+                <span>{itemAtual}</span>
+              </a>
+            </li>
+          ); 
+        })} */}
+      </ul>
+    </ProfileRelationsBoxWrapper>
+  );
+}
+
+export default function Home(props) {
+  const githubUser = props.githubUser;
   const pessoasFavoritas = ['rafaballerini', 'juunegreiros', 'peas', 'omariosouto', 'marcobrunodev', 'felipefialho' ];
-  const [comunidades, setComunidades] = React.useState([{
-    id: new Date().toISOString,
-    title: 'Eu odeio acordar cedo',
-    image: 'https://alurakut.vercel.app/capa-comunidade-01.jpg'
-  }]);
+  const [comunidades, setComunidades] = React.useState([]);
+  const [seguidores, setSeguidores] = React.useState([]);
+
+
+  React.useEffect(function() {
+    fetch(`https://api.github.com/users/${githubUser}/followers`)
+    .then(function (respostaDoServidor) {
+      return respostaDoServidor.json();
+    })
+    .then(function(respostaCompleta) {
+      setSeguidores(respostaCompleta);
+    });
+
+    //API GraphQL
+    fetch('https://graphql.datocms.com/', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'e42ba08f2df1b657f841fffa94ca31',
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify({
+        "query": `query {
+          allCommunities{
+            id
+            title
+            imageUrl
+            linkUrl
+            creatorSlug
+          }
+        }`
+      }),
+    })
+    .then((response) => response.json())
+    .then((respostaCompleta) => {
+      const comunidadesApiDato = respostaCompleta.data.allCommunities;
+      setComunidades(comunidadesApiDato);
+    })
+  }, [])
 
   return (
     // div vasia
@@ -53,14 +112,28 @@ export default function Home() {
           <Box>
             <h2 className="subTitle" >O que você deseja fazer?</h2>
             <form onSubmit={(e) => {
+              e.preventDefault(); //para o refresh
+
               const dadosForm = new FormData(e.target);
               const comunidade = {
-                id: new Date().toISOString,
                 title: dadosForm.get('title'),
-                image: dadosForm.get('image')
+                imageUrl: dadosForm.get('image'),
+                linkUrl: dadosForm.get('url'),
+                creatorSlug: githubUser,
               }
-              e.preventDefault(); //para o refresh
-              setComunidades([...comunidades, comunidade]);
+
+              fetch('/api/comunidades', {
+                method: 'POST',
+                headers:{
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(comunidade)
+              })
+              .then(async (response) => {
+                const dados = await response.json();
+                const comunidade = dados.registro;
+                setComunidades([...comunidades, comunidade]);
+              });
             }}>
               <div>
                 <input 
@@ -77,6 +150,13 @@ export default function Home() {
                   aria-label="Coloque uma URL para usarmos de capa"
                 />
               </div>
+              <div>
+                <input 
+                  placeholder="Coloque uma URL para a comunidade" 
+                  name="url" 
+                  aria-label="Coloque uma URL para a comunidade"
+                />
+              </div>
 
               <button>
                 Criar Comunidade
@@ -85,17 +165,18 @@ export default function Home() {
           </Box>
         </div>
         <div className="profileRelationsArea" style={{gridArea: 'profileRelationsArea'}}>
+          <ProfileRelationsBox title="Seguidores" items={seguidores}/>
           <ProfileRelationsBoxWrapper>
             <h2 className="smallTitle">
-              Pessoas da Comunidade ({pessoasFavoritas.length})
+              Comunidades ({comunidades.length})
             </h2>
 
             <ul>
-              {comunidades.map((itemAtual) => {
+              {comunidades.slice(0,24).map((itemAtual) => {
                 return(
                   <li key={itemAtual.id}>
                     <a href={`/users/${itemAtual.title}`}>
-                      <img src={itemAtual.image} alt="" />
+                      <img src={itemAtual.imageUrl} alt="" />
                       <span>{itemAtual.title}</span>
                     </a>
                   </li>
@@ -109,7 +190,7 @@ export default function Home() {
             </h2>
 
             <ul>
-              {pessoasFavoritas.map((itemAtual) => {
+              {pessoasFavoritas.slice(0,24).map((itemAtual) => {
                 return(
                   <li key={itemAtual}>
                     <a href={`/users/${itemAtual}`}>
@@ -125,4 +206,33 @@ export default function Home() {
       </MainGrid>
     </>
   );
+}
+
+export async function getServerSideProps(context){
+  const cookies = nookies.get(context);
+  const token = cookies.USER_TOKEN;
+  
+  const { isAuthenticated } = await fetch('https://alurakut.vercel.app/api/auth', {
+    headers: {
+      Authorization: token
+    }
+  })
+  .then((resposta) => resposta.json());
+  
+  if(!isAuthenticated){
+    return{
+      redirect: {
+        destination: '/login',
+        permanent: false,
+      },
+    }
+  }
+  
+  const {githubUser} = jwt.decode(token);
+
+  return{
+    props: {
+      githubUser,
+    },
+  }
 }
